@@ -1,5 +1,12 @@
 package hello;
 
+import javax.persistence.Column;
+import javax.persistence.Entity;
+import javax.persistence.Id;
+import javax.persistence.Table;
+
+@Entity
+@Table(name = "people")
 public class Person {
 
     private String lastName;
@@ -17,10 +24,13 @@ public class Person {
         this.firstName = firstName;
     }
 
+    @Id
+    @Column(name = "first_name")
     public String getFirstName() {
         return firstName;
     }
 
+    @Column(name = "last_name")
     public String getLastName() {
         return lastName;
     }
