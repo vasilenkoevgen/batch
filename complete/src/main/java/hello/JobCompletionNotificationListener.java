@@ -47,6 +47,18 @@ public class JobCompletionNotificationListener extends JobExecutionListenerSuppo
 
 			Collection<StepExecution> stepExecutions = jobExecution.getStepExecutions();
 
+//			try (ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream("F:/datas.zip"))) {
+//
+//			} catch (FileNotFoundException e) {
+//				e.printStackTrace();
+//			} catch (IOException e) {
+//				e.printStackTrace();
+//			}
+
+//			while (true){
+//
+//			}
+
 		}
 	}
 }

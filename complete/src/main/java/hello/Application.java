@@ -12,7 +12,7 @@ public class Application {
 
     public static void main(String[] args) throws Exception {
 
-        String[] newArgs = new String[] {"inputFile=F:/datas.zip"};
+        String[] newArgs = new String[] {"inputFile=F:/datas.zip", "myKey=kkk"};
 
         SpringApplication.run(Application.class, newArgs);
     }

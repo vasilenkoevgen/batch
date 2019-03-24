@@ -1,23 +1,27 @@
 package hello;
 
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
+import org.springframework.batch.core.listener.JobExecutionListenerSupport;
+import org.springframework.batch.integration.async.AsyncItemProcessor;
+import org.springframework.batch.integration.async.AsyncItemWriter;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.data.RepositoryItemWriter;
 import org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider;
 import org.springframework.batch.item.database.JdbcBatchItemWriter;
-import org.springframework.batch.item.database.JpaItemWriter;
-import org.springframework.batch.item.database.builder.HibernateItemWriterBuilder;
 import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
 import org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper;
-import org.springframework.batch.item.support.SynchronizedItemStreamReader;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
 import org.springframework.context.annotation.Bean;
@@ -25,12 +29,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.InputStreamSource;
 import org.springframework.core.io.Resource;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import javax.sql.DataSource;
-import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.concurrent.Future;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 @Configuration
@@ -46,14 +52,22 @@ public class BatchConfiguration {
     @Autowired
     public PersonRepository personRepository;
 
+    ZipFile zipFile;
+    ZipFile zipFile2;
+
+//    @Bean
+//    @StepScope
+
+
     // tag::readerwriterprocessor[]
     @Bean
     @StepScope
     public FlatFileItemReader<Person> reader1(@Value("#{jobParameters['inputFile']}") String datas) throws IOException {
 
-        ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(datas));
+        zipFile = new ZipFile(datas);
+        ZipEntry entry = zipFile.getEntry("test.zip");
+        ZipInputStream zipInputStream = new ZipInputStream(zipFile.getInputStream(entry));
         InputStreamSource inputStreamSource = null;
-        ZipEntry entry = null;
 
         do {
             entry = zipInputStream.getNextEntry();
@@ -61,6 +75,20 @@ public class BatchConfiguration {
                 inputStreamSource = new InputStreamResource(zipInputStream);
             }
         } while (inputStreamSource == null);
+
+//        ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(datas));
+//        InputStreamResource inputStreamSource = null;
+//        ZipEntry entry = null;
+//
+//        zipInputStream.getNextEntry();
+//        ZipInputStream zipInputStream1 = new ZipInputStream(zipInputStream);
+//
+//        do {
+//            entry = zipInputStream1.getNextEntry();
+//            if (entry.getName().equals("sample-data_1.csv")) {
+//                inputStreamSource = new InputStreamResource(zipInputStream1);
+//            }
+//        } while (inputStreamSource == null);
 
 
         return new FlatFileItemReaderBuilder<Person>()
@@ -80,9 +108,10 @@ public class BatchConfiguration {
     @StepScope
     public FlatFileItemReader<Person> reader2(@Value("#{jobParameters['inputFile']}") String datas) throws IOException {
 
-        ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(datas));
+        zipFile2 = new ZipFile(datas);
+        ZipEntry entry = zipFile.getEntry("test.zip");
+        ZipInputStream zipInputStream = new ZipInputStream(zipFile.getInputStream(entry));
         InputStreamSource inputStreamSource = null;
-        ZipEntry entry = null;
 
         do {
             entry = zipInputStream.getNextEntry();
@@ -90,6 +119,20 @@ public class BatchConfiguration {
                 inputStreamSource = new InputStreamResource(zipInputStream);
             }
         } while (inputStreamSource == null);
+
+//        ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(datas));
+//        InputStreamResource inputStreamSource = null;
+//        ZipEntry entry = null;
+//
+//        zipInputStream.getNextEntry();
+//        ZipInputStream zipInputStream1 = new ZipInputStream(zipInputStream);
+//
+//        do {
+//        entry = zipInputStream1.getNextEntry();
+//        if (entry.getName().equals("sample-data_2.csv")) {
+//            inputStreamSource = new InputStreamResource(zipInputStream1);
+//        }
+//        } while (inputStreamSource == null);
 
 
         return new FlatFileItemReaderBuilder<Person>()
@@ -105,21 +148,30 @@ public class BatchConfiguration {
     }
 
     @Bean
-    public PersonItemProcessor processor() {
-        return new PersonItemProcessor();
+    public ItemProcessor<Person, Future<Person>> processor(DataSource dataSource) throws Exception {
+        SimpleAsyncTaskExecutor simpleAsyncTaskExecutor = new SimpleAsyncTaskExecutor();
+        simpleAsyncTaskExecutor.setConcurrencyLimit(4);
+
+        AsyncItemProcessor<Person, Person> processor = new AsyncItemProcessor<>();
+        processor.setTaskExecutor(simpleAsyncTaskExecutor);
+        processor.setDelegate(new PersonItemProcessor(dataSource));
+        processor.afterPropertiesSet();
+
+        return processor;
     }
 
     @Bean
-    public RepositoryItemWriter<Person> jpaItemWriter(EntityManagerFactoryBuilder entityManagerFactoryBuilder) {
-        RepositoryItemWriter<Person> repositoryItemWriter = new RepositoryItemWriter<>();
-        repositoryItemWriter.setRepository(personRepository);
-        repositoryItemWriter.setMethodName("save");
+    @Qualifier(value = "asyncItemWriter")
+    public ItemWriter<Future<Person>> asyncItemWriter(ItemWriter<Person> jdbcBatchItemWriter) {
+        AsyncItemWriter<Person> itemWriter = new AsyncItemWriter<>();
+        itemWriter.setDelegate(jdbcBatchItemWriter);
 
-        return repositoryItemWriter;
+        return itemWriter;
     }
 
     @Bean
-    public JdbcBatchItemWriter<Person> writer(DataSource dataSource) {
+    @Qualifier(value = "jdbcBatchItemWriter")
+    public ItemWriter<Person> writer(DataSource dataSource) {
         return new JdbcBatchItemWriterBuilder<Person>()
                 .itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>())
                 .sql("INSERT INTO people (first_name, last_name) VALUES (:firstName, :lastName)")
@@ -134,17 +186,24 @@ public class BatchConfiguration {
         return jobBuilderFactory.get("importUserJob")
                 .incrementer(new RunIdIncrementer())
                 .listener(listener)
+                .listener(jobExecutionListenerSupport())
                 .flow(step1)
-                .next(step2)
+//                .next(step2)
                 .end()
                 .build();
     }
 
     @Bean
-    public Step step1(JdbcBatchItemWriter<Person> writer,
+    public CustomSkipListener<Person> customSkipListener() {
+        CustomSkipListener<Person> customSkipListener = new CustomSkipListener<>();
+        return customSkipListener;
+    }
+
+    @Bean
+    public Step step1(ItemWriter<Future<Person>> asyncItemWriter,
                       LinesSkipper linesSkipper,
-                      CustomSkipListener<Person> customSkipListener,
-                      RepositoryItemWriter<Person> repositoryItemWriter) throws IOException {
+                      CustomChunkListener customChunkListener,
+                      DataSource dataSource) throws Exception {
 
         ThreadPoolTaskExecutor threadPoolExecutor = new ThreadPoolTaskExecutor();
         threadPoolExecutor.setMaxPoolSize(4);
@@ -152,31 +211,49 @@ public class BatchConfiguration {
         threadPoolExecutor.afterPropertiesSet();
 
         return stepBuilderFactory.get("step1")
-                .<Person, Person>chunk(2000)
-                .reader(reader1(null)).faultTolerant().skipPolicy(linesSkipper)
-                .processor(processor())
-                .writer(repositoryItemWriter)
-                .listener(customSkipListener)
-                .taskExecutor(threadPoolExecutor)
+                .<Person, Future<Person>>chunk(2000)
+                .reader(reader1(null))
+                .faultTolerant().skipPolicy(linesSkipper)
+                .processor(processor(dataSource))
+                .writer(asyncItemWriter)
+                .listener(customChunkListener)
+//                .taskExecutor(threadPoolExecutor)
                 .build();
     }
+
+//    @Bean
+//    public Step step2(JdbcBatchItemWriter<Person> writer,
+//                      LinesSkipper linesSkipper,
+//                      RepositoryItemWriter<Person> repositoryItemWriter) throws IOException {
+//        ThreadPoolTaskExecutor threadPoolExecutor = new ThreadPoolTaskExecutor();
+//        threadPoolExecutor.setMaxPoolSize(4);
+//        threadPoolExecutor.setCorePoolSize(4);
+//        threadPoolExecutor.afterPropertiesSet();
+//
+//        return stepBuilderFactory.get("step2")
+//                .<Person, Person>chunk(2000)
+//                .reader(reader2(null)).faultTolerant().skipPolicy(linesSkipper)
+//                .processor(processor())
+//                .writer(repositoryItemWriter)
+//                //.taskExecutor(threadPoolExecutor)
+//                .build();
+//    }
+//    // end::jobstep[]
 
     @Bean
-    public Step step2(JdbcBatchItemWriter<Person> writer,
-                      LinesSkipper linesSkipper,
-                      RepositoryItemWriter<Person> repositoryItemWriter) throws IOException {
-        ThreadPoolTaskExecutor threadPoolExecutor = new ThreadPoolTaskExecutor();
-        threadPoolExecutor.setMaxPoolSize(4);
-        threadPoolExecutor.setCorePoolSize(4);
-        threadPoolExecutor.afterPropertiesSet();
+    public JobExecutionListenerSupport jobExecutionListenerSupport() {
 
-        return stepBuilderFactory.get("step2")
-                .<Person, Person>chunk(2000)
-                .reader(reader2(null)).faultTolerant().skipPolicy(linesSkipper)
-                .processor(processor())
-                .writer(repositoryItemWriter)
-                .taskExecutor(threadPoolExecutor)
-                .build();
+
+        return new JobExecutionListenerSupport() {
+            @Override
+            public void afterJob(JobExecution jobExecution) {
+                try {
+                    zipFile.close();
+//                    zipFile2.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        };
     }
-    // end::jobstep[]
 }
