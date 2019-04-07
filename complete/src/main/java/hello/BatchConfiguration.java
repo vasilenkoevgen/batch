@@ -174,6 +174,7 @@ public class BatchConfiguration {
     public ItemWriter<Person> writer(DataSource dataSource) {
         return new JdbcBatchItemWriterBuilder<Person>()
                 .itemSqlParameterSourceProvider(new BeanPropertyItemSqlParameterSourceProvider<>())
+//                .sql("INSERT INTO people (first_name, last_name) VALUES (:firstName, :lastName)")
                 .sql("INSERT INTO people (first_name, last_name) VALUES (:firstName, :lastName)")
                 .dataSource(dataSource)
                 .build();
@@ -213,10 +214,11 @@ public class BatchConfiguration {
         return stepBuilderFactory.get("step1")
                 .<Person, Future<Person>>chunk(2000)
                 .reader(reader1(null))
-                .faultTolerant().skipPolicy(linesSkipper)
                 .processor(processor(dataSource))
                 .writer(asyncItemWriter)
-                .listener(customChunkListener)
+                .faultTolerant()
+                .skipPolicy(linesSkipper)
+//                .listener(customChunkListener)
 //                .taskExecutor(threadPoolExecutor)
                 .build();
     }
